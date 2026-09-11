@@ -18,11 +18,29 @@ local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local GridConfig = require(ReplicatedStorage:WaitForChild("GridConfig"))
-local MapQuery = require(ReplicatedStorage:WaitForChild("MapQuery"))
 
 local player = Players.LocalPlayer
+local mapFolder = workspace:WaitForChild("MapTiles")
 
 local SPEED_TILES_PER_SEC = 4 -- samain/tuning belakangan sesuai rasanya
+
+-- PENTING: MapQuery adalah ModuleScript, dan ModuleScript TIDAK
+-- direplikasi antara server dan client -- data yang di-set server lewat
+-- MapQuery.SetTile() TIDAK bisa dibaca client manapun lewat
+-- MapQuery.IsSolid(). Makanya solid/nggaknya sebuah tile dicek lewat
+-- Attribute "Solid" di Part-nya langsung (di-set MapGenerator.server.lua),
+-- karena Attribute Instance OTOMATIS direplikasi Roblox ke semua client.
+local LAYER_CHECK_ORDER = { "rock", "wall", "floor", "hazard" }
+
+local function isSolidAt(gx, gz)
+	for _, layerName in ipairs(LAYER_CHECK_ORDER) do
+		local part = mapFolder:FindFirstChild(string.format("%s_%d_%d", layerName, gx, gz))
+		if part then
+			return part:GetAttribute("Solid") == true
+		end
+	end
+	return false -- nggak ketemu Part sama sekali = anggap aman/nggak solid
+end
 
 -- ==== Input state (keyboard + tombol mobile custom, disatuin di sini) ====
 local keysDown = { up = false, down = false, left = false, right = false }
@@ -143,7 +161,7 @@ end
 
 local function tryStartMove(dx, dz)
 	local ngx, ngz = state.gx + dx, state.gz + dz
-	if MapQuery.IsSolid(ngx, ngz) then return false end
+	if isSolidAt(ngx, ngz) then return false end
 	state.fromPos = state.toPos
 	state.toPos = tileCenterWorld(ngx, ngz)
 	state.gx, state.gz = ngx, ngz
@@ -166,21 +184,25 @@ RunService.RenderStepped:Connect(function(dt)
 		return
 	end
 
+	local dx, dz = 0, 0
+	if keysDown.left then dx -= 1 end
+	if keysDown.right then dx += 1 end
+	if dx == 0 and keysDown.up then dz -= 1 end
+	if dx == 0 and keysDown.down then dz += 1 end
+	-- catatan: sumbu Z Roblox itu "maju" ke arah negatif secara konvensi kamera
+	-- default, tapi karena kamera kita udah full custom (lookAt lurus ke
+	-- bawah), up/down di sini dipetakan langsung dz negatif/positif biar
+	-- konsisten sama arah visual di layar. Kalau kebalik pas dites, tinggal
+	-- tukar tanda dz di dua baris di atas.
+
+	-- Facing (arah hadap/mirror sprite) di-update LANGSUNG tiap frame dari
+	-- tombol yang lagi ditekan -- SENGAJA dipisah dari logic mulai gerak
+	-- di bawah, biar mirror-nya instan pas ganti arah, nggak perlu nunggu
+	-- geseran ke tile yang lagi berjalan selesai dulu.
+	if dx < 0 then state.facing = -1 end
+	if dx > 0 then state.facing = 1 end
+
 	if not state.isMoving then
-		local dx, dz = 0, 0
-		if keysDown.left then dx -= 1 end
-		if keysDown.right then dx += 1 end
-		if dx == 0 and keysDown.up then dz -= 1 end
-		if dx == 0 and keysDown.down then dz += 1 end
-		-- catatan: sumbu Z Roblox itu "maju" ke arah negatif secara konvensi kamera
-		-- default, tapi karena kamera kita udah full custom (lookAt lurus ke
-		-- bawah), up/down di sini dipetakan langsung dz negatif/positif biar
-		-- konsisten sama arah visual di layar. Kalau kebalik pas dites, tinggal
-		-- tukar tanda dz di dua baris di atas.
-
-		if dx < 0 then state.facing = -1 end
-		if dx > 0 then state.facing = 1 end
-
 		if dx ~= 0 or dz ~= 0 then
 			tryStartMove(dx, dz)
 		end
