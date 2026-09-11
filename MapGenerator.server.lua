@@ -106,11 +106,12 @@ local ID_TEXTURES = {
 --   HAZARD_OVERRIDE_IDS = { [7] = true, [9] = true, [20] = true }
 local HAZARD_OVERRIDE_IDS = {
 	-- Semua id floor KECUALI id 3 (main floor) dan beberapa id lain yang
-	-- ternyata juga aman dipijak (102, 47, 6, 5) -- id wall (10-41) &
-	-- rock nggak perlu disebut di sini karena mereka layer beda, nggak
-	-- pernah kepake id yang sama.
+	-- ternyata juga aman dipijak (102, 47, 6, 5, dan 45 -- top-floor
+	-- varian ke-2 yang tekstur & fungsinya sama kayak 47) -- id wall
+	-- (10-41) & rock nggak perlu disebut di sini karena mereka layer
+	-- beda, nggak pernah kepake id yang sama.
 	[4] = true, [7] = true, [8] = true, [9] = true,
-	[42] = true, [43] = true, [44] = true, [45] = true, [46] = true,
+	[42] = true, [43] = true, [44] = true, [46] = true,
 	[48] = true, [49] = true, [50] = true, [51] = true,
 	[52] = true, [53] = true, [54] = true, [55] = true,
 	[100] = true, [101] = true,
@@ -168,6 +169,24 @@ local EXTRA_HAZARD_UNDER_WALL = {
 	[20] = { [53] = true },
 	[33] = { [60] = true },
 	[34] = { [60] = true },
+}
+
+-- Posisi-posisi ini kesalahan nempel di layer ROCK atau WALL pas di
+-- Sprite Fusion (harusnya di layer floor biasa/dianggap hazard), jadi
+-- ikut ketarik jadi solid otomatis oleh layer.solid ATAU aturan
+-- isWallOrRockId -- padahal harusnya sebagian bisa dipijak. Tabel ini
+-- PAKSA TOTAL floor (aman) atau hazard (mati) buat posisi-posisi
+-- tertentu, ngelewatin/nge-skip aturan solid/id apapun di atasnya sama
+-- sekali. Prioritas paling tinggi di antara semua override.
+local POSITION_LAYER_OVERRIDE = {
+	-- Awalnya nyasar di layer ROCK
+	[53] = { [38] = "floor", [39] = "hazard", [40] = "floor", [41] = "floor" },
+	[54] = { [38] = "hazard", [39] = "hazard", [40] = "floor", [41] = "floor" },
+	[55] = { [38] = "hazard", [39] = "floor", [40] = "floor", [41] = "floor" },
+	-- Awalnya nyasar di layer WALL
+	[58] = { [21] = "hazard", [22] = "hazard", [23] = "hazard", [24] = "floor" },
+	[59] = { [20] = "hazard", [21] = "hazard", [22] = "hazard", [23] = "hazard", [24] = "floor" },
+	[60] = { [20] = "hazard", [21] = "hazard", [22] = "hazard", [23] = "hazard", [24] = "floor" },
 }
 
 local TILE = GridConfig.TILE
@@ -297,6 +316,17 @@ local function createTilePart(layerName, gx, gz, effectiveId, solid)
 	-- karakter, tanpa perlu label ngambang di semua tile sekaligus.
 	part:SetAttribute("EffectiveId", effectiveId)
 
+	-- PENTING: MapQuery adalah ModuleScript, dan ModuleScript TIDAK
+	-- direplikasi/di-share antara server dan client -- server dan tiap
+	-- client masing-masing dapet KOPIAN SENDIRI yang independen. Jadi
+	-- MapQuery.SetTile() yang dipanggil di server ini TIDAK bisa dibaca
+	-- lewat MapQuery.IsSolid() di client manapun (selalu balik data
+	-- kosong/default di sisi client). Solusinya: simpan juga statusnya
+	-- di Attribute Part ini, karena Attribute OTOMATIS direplikasi
+	-- Roblox ke semua client. GridMovement.client.lua baca dari sini
+	-- (bukan dari MapQuery) buat nentuin solid/nggak.
+	part:SetAttribute("Solid", solid)
+
 	if DEBUG_SHOW_IDS then
 		addDebugIdLabel(part, effectiveId, gx, gz)
 	end
@@ -317,21 +347,32 @@ for _, layerName in ipairs(LAYER_ORDER) do
 				-- id remap itu; kalau nggak, pakai id asli dari map.json.
 				local effectiveId = (POSITION_ID_OVERRIDE[tile.x] and POSITION_ID_OVERRIDE[tile.x][tile.y]) or tile.id
 
-				-- Kalau id efektif ini masuk RANGE id wall (10-41) atau id
-				-- rock (2), PAKSA jadi solid -- nggak peduli tile ini
-				-- "resminya" tercatat di layer floor. Ini nutupin kasus tile
-				-- yang keliatan kayak rock/wall (pakai texture wall/rock)
-				-- tapi kesalahan taruh nempel di layer floor pas di Sprite
-				-- Fusion, jadi nembus padahal keliatannya solid.
-				local isWallOrRockId = (effectiveId >= 10 and effectiveId <= 41) or effectiveId == 2
+				local layerOverride = POSITION_LAYER_OVERRIDE[tile.x] and POSITION_LAYER_OVERRIDE[tile.x][tile.y]
 
-				-- Kalau id efektif ini ada di daftar override, perlakukan sebagai
-				-- hazard (mematikan, tidak solid) walaupun dia tercatat di layer
-				-- floor/wall/rock -- tampilan (texture) TIDAK terpengaruh sama
-				-- sekali, cuma logic gameplay-nya yang berubah.
-				local isForcedHazard = HAZARD_OVERRIDE_IDS[effectiveId] == true
-				local registeredLayerName = isForcedHazard and "hazard" or (isWallOrRockId and "wall") or layer.name
-				local solid = isForcedHazard and false or (isWallOrRockId or layer.solid)
+				local registeredLayerName, solid
+				if layerOverride then
+					-- Posisi ini kesalahan taruh layer -- paksa total jadi
+					-- floor (aman) atau hazard (mati), skip semua aturan
+					-- solid/id di bawah ini sama sekali.
+					registeredLayerName = layerOverride
+					solid = false
+				else
+					-- Kalau id efektif ini masuk RANGE id wall (10-41) atau id
+					-- rock (2), PAKSA jadi solid -- nggak peduli tile ini
+					-- "resminya" tercatat di layer floor. Ini nutupin kasus tile
+					-- yang keliatan kayak rock/wall (pakai texture wall/rock)
+					-- tapi kesalahan taruh nempel di layer floor pas di Sprite
+					-- Fusion, jadi nembus padahal keliatannya solid.
+					local isWallOrRockId = (effectiveId >= 10 and effectiveId <= 41) or effectiveId == 2
+
+					-- Kalau id efektif ini ada di daftar override, perlakukan sebagai
+					-- hazard (mematikan, tidak solid) walaupun dia tercatat di layer
+					-- floor/wall/rock -- tampilan (texture) TIDAK terpengaruh sama
+					-- sekali, cuma logic gameplay-nya yang berubah.
+					local isForcedHazard = HAZARD_OVERRIDE_IDS[effectiveId] == true
+					registeredLayerName = isForcedHazard and "hazard" or (isWallOrRockId and "wall") or layer.name
+					solid = isForcedHazard and false or (isWallOrRockId or layer.solid)
+				end
 
 				createTilePart(layer.name, tile.x, tile.y, effectiveId, solid)
 
@@ -345,11 +386,18 @@ end
 
 -- ==== 2) Sisa tile yang nggak kesebut floor/wall/rock (termasuk yang
 --         di-delete di atas) = tile lava individual (id 46), mematikan --
---         KECUALI yang ada di EXTRA_FLOOR_TILES, itu jadi floor biasa ====
+--         KECUALI yang ada di EXTRA_FLOOR_TILES, itu jadi floor biasa.
+--         Loop-nya sengaja dilebarin (PADDING_TILES) MELEWATI batas asli
+--         map -- biar kamera nggak pernah "nembus" ke Baseplate default
+--         Roblox pas karakter jalan ke ujung/tepi map. Ini alternatif
+--         dari clamp kamera -- dipilih karena map ini nggak punya
+--         dinding besar di pinggir (map lain nanti mungkin butuh clamp
+--         kamera beneran kalau emang ada dinding besar). ====
 local LAVA_ID = 46
+local PADDING_TILES = 16 -- 128 stud ekstra ke segala arah, aman buat aspect ratio HP/laptop manapun
 local floorSolid = (layersByName.floor and layersByName.floor.solid) or false
-for gx = 0, MapData.mapWidth - 1 do
-	for gz = 0, MapData.mapHeight - 1 do
+for gx = -PADDING_TILES, MapData.mapWidth - 1 + PADDING_TILES do
+	for gz = -PADDING_TILES, MapData.mapHeight - 1 + PADDING_TILES do
 		local alreadySet = explicitlySet[gx] and explicitlySet[gx][gz]
 		if not alreadySet then
 			local extraFloorId = EXTRA_FLOOR_TILES[gx] and EXTRA_FLOOR_TILES[gx][gz]
