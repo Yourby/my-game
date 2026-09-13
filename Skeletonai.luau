@@ -233,7 +233,18 @@ local function createSkeleton(homeGx, homeGz)
 		end
 	end
 
-	RunService.Heartbeat:Connect(function(dt)
+	local heartbeatConn
+	heartbeatConn = RunService.Heartbeat:Connect(function(dt)
+		-- PENTING (ditambah buat integrasi TNT): kalau part Skeleton ini
+		-- udah dihancurkan dari LUAR (misal kena ledakan TNT di
+		-- TNTExplosion.server.lua), disconnect diri sendiri & stop total.
+		-- Tanpa cek ini, loop bakal tetap jalan tiap frame nyoba baca/ubah
+		-- properti part yang udah nggak ada -> error terus-terusan di Output.
+		if not part.Parent then
+			heartbeatConn:Disconnect()
+			return
+		end
+
 		if state.mode == "sleeping" then
 			-- Sleeping normal: begitu ada pemain masuk aggro zone, LANGSUNG
 			-- ngejar, TANPA delay (delay cuma buat kasus "spawnDelay" di atas).
