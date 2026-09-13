@@ -34,7 +34,7 @@ local TILE_TEXTURES = {
 -- floor-sludge, sekarang direpurpose khusus buat gambar hijau polos
 -- lava/toxic sludge -- isi Asset ID-nya begitu udah di-crop & upload).
 local ID_TEXTURES = {
-	[3] = "rbxassetid://91101911532471",
+	[3] = "rbxassetid://80847085635198",
 	[4] = "rbxassetid://123651518468630",
 	[5] = "rbxassetid://94135987745512",
 	[6] = "rbxassetid://84184238655263",
